@@ -78,7 +78,6 @@ resource "aws_security_group" "sg1" {
 }
 
 
-
 # EC2
 resource "aws_instance" "example_app" {
   ami = "ami-09f85f3aaae282910"
@@ -92,6 +91,11 @@ resource "aws_ec2_instance_connect_endpoint" "endpit1" {
 }
 
 # EIP
+resource "aws_eip" "lb" {
+  instance = aws_instance.example_app.id
+  domain = "vpc"
+}
+
 
 # //////////////////////
 # Data
