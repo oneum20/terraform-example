@@ -1,5 +1,5 @@
 ## Diagram
-```Mermaid
+```mermaid
 graph TD
   subgraph aws
 		direction LR

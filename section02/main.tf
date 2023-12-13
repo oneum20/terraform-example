@@ -15,17 +15,14 @@ variable "vpc_cidr" {
     type    = string
     default = "172.16.0.0/16"
 }
-variable "subent_public_cidrs" {
-    type    = list(string)
-    default = ["172.16.4.0/24","172.16.5.0/24"]
-}
-variable "subnet_app_cidrs" {
-    type    = list(string)
-    default = ["172.16.0.0/24", "172.16.1.0/24"]
-}
-variable "subnet_db_cidrs" {
-    type    = list(string)
-    default = ["172.16.2.0/24", "172.16.3.0/24"]
+variable "subnet_cidrs" {
+    type = map(list(string))
+
+    default = {        
+        app    : ["172.16.0.0/24", "172.16.1.0/24"],
+        db     : ["172.16.2.0/24", "172.16.3.0/24"],
+        public : ["172.16.4.0/24", "172.16.5.0/24"]
+    }
 }
 variable "rds_username" {
     type = string
@@ -46,42 +43,33 @@ resource "aws_vpc" "vpc1" {
 }
 
 # Subnet
-resource "aws_subnet" "subent_public1" {
-    cidr_block          = var.subent_public_cidrs[0]
+resource "aws_subnet" "subnet_public" {
+    count = length(var.subnet_cidrs.public)
+
+    cidr_block          = var.subnet_cidrs.public[count.index]
     vpc_id              = aws_vpc.vpc1.id
-    availability_zone   = data.aws_availability_zones.available.names[0]
-}
-resource "aws_subnet" "subent_public2" {
-    cidr_block          = var.subent_public_cidrs[1]
-    vpc_id              = aws_vpc.vpc1.id
-    availability_zone   = data.aws_availability_zones.available.names[1]
+    availability_zone   = data.aws_availability_zones.available.names[count.index]    
 }
 
-resource "aws_subnet" "subnet_app1" {
-    cidr_block          = var.subnet_app_cidrs[0]
+resource "aws_subnet" "subnet_app" {
+    count = length(var.subnet_cidrs.app)
+
+    cidr_block          = var.subnet_cidrs.app[count.index]
     vpc_id              = aws_vpc.vpc1.id
-    availability_zone   = data.aws_availability_zones.available.names[0]
-}
-resource "aws_subnet" "subnet_app2" {
-    cidr_block          = var.subnet_app_cidrs[1]
-    vpc_id              = aws_vpc.vpc1.id
-    availability_zone   = data.aws_availability_zones.available.names[1]
+    availability_zone   = data.aws_availability_zones.available.names[count.index]
 }
 
-resource "aws_subnet" "subnet_db1" {
-    cidr_block          = var.subnet_db_cidrs[0]
+resource "aws_subnet" "subnet_db" {
+    count = length(var.subnet_cidrs.db)
+
+    cidr_block          = var.subnet_cidrs.db[count.index]
     vpc_id              = aws_vpc.vpc1.id
-    availability_zone   = data.aws_availability_zones.available.names[0]
-}
-resource "aws_subnet" "subnet_db2" {
-    cidr_block          = var.subnet_db_cidrs[1]
-    vpc_id              = aws_vpc.vpc1.id
-    availability_zone   = data.aws_availability_zones.available.names[1]
+    availability_zone   = data.aws_availability_zones.available.names[count.index]
 }
 
 resource "aws_nat_gateway" "ngt1" {
     allocation_id = aws_eip.eip1.id
-    subnet_id     = aws_subnet.subent_public1.id
+    subnet_id     = aws_subnet.subnet_public[0].id
 
     tags = {
         Name = "gw NAT"
@@ -96,7 +84,7 @@ resource "aws_internet_gateway" "igw1" {
 }
 
 # Route Table
-resource "aws_route_table" "rt1" {
+resource "aws_route_table" "rt_public" {
     vpc_id = aws_vpc.vpc1.id
 
     route{
@@ -104,7 +92,7 @@ resource "aws_route_table" "rt1" {
         gateway_id = aws_internet_gateway.igw1.id
     }
 }
-resource "aws_route_table" "rt2" {
+resource "aws_route_table" "rt_app" {
     vpc_id = aws_vpc.vpc1.id
 
     route{
@@ -113,22 +101,18 @@ resource "aws_route_table" "rt2" {
     }
 }
 
-resource "aws_route_table_association" "rta1" {
-    subnet_id       = aws_subnet.subent_public1.id
-    route_table_id  = aws_route_table.rt1.id
-}
-resource "aws_route_table_association" "rta2" {
-    subnet_id       = aws_subnet.subent_public2.id
-    route_table_id  = aws_route_table.rt1.id
+resource "aws_route_table_association" "rta_public" {
+    subnet_id       = each.value.id
+    route_table_id  = aws_route_table.rt_public.id
+
+    for_each = { for k, v in aws_subnet.subnet_public : k => v}
 }
 
-resource "aws_route_table_association" "rta3" {
-    subnet_id       = aws_subnet.subnet_app1.id
-    route_table_id  = aws_route_table.rt2.id
-}
-resource "aws_route_table_association" "rta4" {
-    subnet_id       = aws_subnet.subnet_app2.id
-    route_table_id  = aws_route_table.rt2.id
+resource "aws_route_table_association" "rta_app" {
+    subnet_id       = each.value.id
+    route_table_id  = aws_route_table.rt_app.id
+
+    for_each = { for k, v in aws_subnet.subnet_app : k => v}
 }
 
 # Security Group
@@ -213,7 +197,9 @@ resource "aws_lb" "lb1" {
     internal            = false
     load_balancer_type  = "application"
     security_groups     = [ aws_security_group.sg_alb.id ]
-    subnets             = [ aws_subnet.subent_public1.id, aws_subnet.subent_public2.id ]
+    subnets             = [for o in aws_subnet.subnet_public : o.id]
+
+    
 }
 
 resource "aws_lb_listener" "lb_lnr1" {
@@ -238,7 +224,7 @@ resource "aws_instance" "example_app" {
     count                   = 3 
     ami                     = "ami-09f85f3aaae282910"
     instance_type           = "t3.medium"
-    subnet_id               = aws_subnet.subnet_app1.id
+    subnet_id               = aws_subnet.subnet_app[0].id
     vpc_security_group_ids  = [aws_security_group.sg_ssh.id, 
                                 aws_security_group.sg_example_app.id]
     
@@ -255,13 +241,13 @@ resource "aws_instance" "example_app" {
               EOF
 }
 resource "aws_ec2_instance_connect_endpoint" "endpt1" {
-    subnet_id = aws_subnet.subnet_app1.id
+    subnet_id = aws_subnet.subnet_app[0].id
 }
 
 # RDS
 resource "aws_db_subnet_group" "default" {
     name       = "main"
-    subnet_ids = [aws_subnet.subnet_db1.id, aws_subnet.subnet_db2.id]
+    subnet_ids = [for o in aws_subnet.subnet_db : o.id]
 }
 
 resource "aws_db_instance" "default" {
