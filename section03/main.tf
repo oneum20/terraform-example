@@ -231,7 +231,7 @@ resource "aws_autoscaling_policy" "scale_down" {
     cooldown               = 120
 }
 resource "aws_autoscaling_policy" "scale_up" {
-    name                   = "tf_scale_down"
+    name                   = "tf_scale_up"
     autoscaling_group_name = aws_autoscaling_group.asg1.name
     adjustment_type        = "ChangeInCapacity"
     scaling_adjustment     = 1
